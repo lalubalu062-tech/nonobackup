@@ -1,0 +1,12 @@
+projects/
+runner/workspace/
+backend/venv/
+worker/__pycache__/
+backend/__pycache__/
+*.pyc
+*.log
+*.db-journal
+backups/
+*.tar.gz
+backups/
+*.tar.gz

@@ -1,0 +1,384 @@
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Depends
+from sqlalchemy.orm import Session
+from database import engine, SessionLocal, Base
+from models import Worker, Project, User
+from pydantic import BaseModel
+from auth import hash_password, verify_password, create_token, get_current_user
+
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(
+    title="NONO API",
+    version="0.1.0"
+)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@app.get("/")
+def home():
+    return {
+        "name": "NONO",
+        "status": "online"
+    }
+
+@app.post("/projects")
+def create_project(
+    name: str,
+    runtime: str,
+    repo: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+
+    project = Project(
+        name=name,
+        runtime=runtime,
+        repo=repo,
+        user_id=current_user["user_id"],
+        status="pending",
+    )
+
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+
+    return {
+        "id": project.id,
+        "name": project.name,
+        "status": project.status
+    }
+
+
+@app.get("/projects")
+def list_projects(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+
+    return db.query(Project).filter(
+        Project.user_id == current_user["user_id"]
+    ).all()
+
+
+@app.get("/jobs")
+def get_jobs(db: Session = Depends(get_db)):
+    return db.query(Project).filter(Project.status.in_(["pending","restarting"])).all()
+
+@app.post("/jobs/{job_id}/claim")
+def claim_job(
+    job_id: int,
+    worker_id: str,
+    db: Session = Depends(get_db)
+):
+    project = db.query(Project).filter(
+        Project.id == job_id
+    ).first()
+
+    if not project:
+        return {"error":"project not found"}
+
+    if project.status not in ["pending","restarting"]:
+        return {"error":"already claimed"}
+
+    project.status = "running"
+    project.worker_id = worker_id
+
+    db.commit()
+    db.refresh(project)
+
+    return {
+        "id": project.id,
+        "status": project.status,
+        "worker_id": project.worker_id
+    }
+
+@app.post("/jobs/{job_id}/complete")
+def complete_job(job_id: int, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == job_id).first()
+
+    if not project:
+        return {"error": "project not found"}
+
+    project.status = "completed"
+    db.commit()
+
+    return {
+        "id": project.id,
+        "status": project.status
+    }
+
+
+@app.get("/processes")
+def get_processes():
+    import json
+
+    try:
+        with open("data/processes.json") as f:
+            return json.load(f)
+
+    except Exception as e:
+        return {
+            "error": str(e)
+        }
+
+
+@app.get("/projects/{project_id}/logs")
+def get_logs(project_id: int):
+
+    import os
+
+    log_file = f"/tmp/nono-{project_id}.log"
+
+    if not os.path.exists(log_file):
+        return {
+            "logs": ""
+        }
+
+    with open(log_file) as f:
+        return {
+            "logs": f.read()
+        }
+
+
+@app.get("/projects/{project_id}/status")
+def project_status(project_id:int, user=Depends(get_current_user)):
+
+    import os
+
+    db=SessionLocal()
+
+    project=db.query(Project).filter(
+        Project.id==project_id
+    ).first()
+
+    if not project:
+        return {
+            "error":"not found"
+        }
+
+    alive=False
+
+    if project.pid:
+        try:
+            os.kill(project.pid,0)
+            alive=True
+        except:
+            alive=False
+
+    return {
+        "id":project.id,
+        "name":project.name,
+        "status": "running" if alive else "stopped",
+        "pid":project.pid,
+        "worker_id":project.worker_id
+    }
+
+
+@app.post("/jobs/{job_id}/status")
+def update_job_status(
+    job_id:int,
+    status:str,
+    pid:int=0
+):
+    db=SessionLocal()
+
+    project=db.query(Project).filter(
+        Project.id==job_id
+    ).first()
+
+    if not project:
+        return {
+            "error":"project not found"
+        }
+
+    project.status=status
+
+    if pid:
+        project.pid=pid
+
+    db.commit()
+
+    return {
+        "id":job_id,
+        "status":status,
+        "pid":pid
+    }
+
+@app.post("/workers/heartbeat")
+def worker_heartbeat(data: dict):
+    from datetime import datetime
+
+    worker_id = data.get("worker_id")
+
+    if not worker_id:
+        return {
+            "error":"worker_id missing"
+        }
+
+    db = SessionLocal()
+
+    worker = db.query(Worker).filter(
+        Worker.worker_id == worker_id
+    ).first()
+
+    if worker:
+        worker.status = "online"
+        worker.last_seen = datetime.utcnow()
+
+    else:
+        worker = Worker(
+            worker_id=worker_id,
+            status="online"
+        )
+        db.add(worker)
+
+    db.commit()
+    db.close()
+
+    return {
+        "status":"ok",
+        "worker_id":worker_id
+    }
+
+@app.post("/projects/{project_id}/stop")
+def stop_project(
+    project_id:int,
+    current_user: dict = Depends(get_current_user)
+):
+    import os
+    import signal
+
+    db = SessionLocal()
+
+    project = db.query(Project).filter(
+        Project.id == project_id
+    ).first()
+
+    if not project:
+        return {
+            "error":"project not found"
+        }
+
+    if project.pid:
+        try:
+            os.kill(
+                project.pid,
+                signal.SIGTERM
+            )
+            print(
+                "Stopped PID:",
+                project.pid
+            )
+        except Exception as e:
+            print(
+                "Kill error:",
+                e
+            )
+
+    project.status="stopped"
+    project.pid=None
+
+    db.commit()
+    db.close()
+
+    return {
+        "id":project_id,
+        "status":"stopped"
+    }
+
+@app.post("/projects/{project_id}/restart")
+def restart_project(
+    project_id:int,
+    current_user: dict = Depends(get_current_user)
+):
+    import os
+    import signal
+
+    db = SessionLocal()
+
+    project = db.query(Project).filter(
+        Project.id == project_id
+    ).first()
+
+    if not project:
+        return {
+            "error":"project not found"
+        }
+
+    # stop old process
+    if project.pid:
+        try:
+            os.kill(
+                project.pid,
+                signal.SIGTERM
+            )
+            print(
+                "Old process stopped:",
+                project.pid
+            )
+        except Exception as e:
+            print(
+                "Stop error:",
+                e
+            )
+
+    # reset for new deploy
+    project.pid = None
+    project.status = "pending"
+
+    db.commit()
+    db.close()
+
+    return {
+        "id":project_id,
+        "status":"pending",
+        "message":"restart queued"
+    }
+
+@app.get("/projects/{project_id}/logs")
+def project_logs(
+    project_id:int,
+    current_user: dict = Depends(get_current_user)
+):
+    import os
+
+    log_file=f"/tmp/nono-{project_id}.log"
+
+    if not os.path.exists(log_file):
+        return {
+            "id":project_id,
+            "logs":""
+        }
+
+    with open(log_file,"r") as f:
+        data=f.read()
+
+    return {
+        "id":project_id,
+        "logs":data[-5000:]
+    }
+
+@app.get("/workers")
+def get_workers(db: Session = Depends(get_db)):
+
+    workers = db.query(Worker).all()
+
+    return [
+        {
+            "worker_id": w.worker_id,
+            "status": w.status,
+            "cpu": w.cpu,
+            "ram": w.ram,
+            "projects": w.projects,
+            "hostname": w.hostname,
+            "last_seen": str(w.last_seen)
+        }
+        for w in workers
+    ]
+

@@ -1,0 +1,88 @@
+import os
+import json
+import time
+import psutil
+import signal
+
+FILE="processes.json"
+
+MAX_RAM_MB = 512
+MAX_CPU_PERCENT = 50
+
+
+def save(data):
+    with open(FILE,"w") as f:
+        json.dump(data,f,indent=2)
+
+
+def kill_project(project_id, pid, data):
+    try:
+        os.kill(pid, signal.SIGTERM)
+
+        data[str(project_id)]["status"] = "killed"
+
+        save(data)
+
+        print("Killed:", project_id)
+
+    except Exception as e:
+        print(e)
+
+
+def check_resources():
+
+    if not os.path.exists(FILE):
+        return
+
+    with open(FILE) as f:
+        data=json.load(f)
+
+
+    for project,p in data.items():
+        if p.get("status") != "running":
+            continue
+        pid=p["pid"]
+
+        try:
+
+            proc=psutil.Process(pid)
+
+            ram = proc.memory_info().rss / 1024 / 1024
+            cpu = proc.cpu_percent(interval=1)
+
+
+            p["ram_mb"] = round(ram,2)
+            p["cpu_percent"] = cpu
+            p["limit_ram_mb"] = MAX_RAM_MB
+            p["limit_cpu_percent"] = MAX_CPU_PERCENT
+
+
+            print(
+                f"Project: {project} "
+                f"RAM: {ram:.2f} MB "
+                f"CPU: {cpu}%"
+            )
+            if ram > MAX_RAM_MB or cpu > MAX_CPU_PERCENT:
+                kill_project(
+                    project,
+                    pid,
+                    data
+                )
+
+
+
+        except psutil.NoSuchProcess:
+            p["status"]="stopped"
+
+
+    save(data)
+
+
+
+if __name__=="__main__":
+
+    print("NONO Resource Monitor Started")
+
+    while True:
+        check_resources()
+        time.sleep(30)

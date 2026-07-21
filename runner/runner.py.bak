@@ -1,0 +1,57 @@
+import time
+import requests
+
+from clone import clone_repo
+from runtime import detect_runtime
+from executor import run_project
+
+API = "http://127.0.0.1:8001"
+
+import socket
+WORKER_ID = "node-" + socket.gethostname()
+
+print("NONO Runner Started")
+
+while True:
+    try:
+        jobs = requests.get(f"{API}/jobs").json()
+
+        for job in jobs:
+
+            print("Found:", job["name"])
+
+            claim = requests.post(
+                f"{API}/jobs/{job['id']}/claim?worker_id={WORKER_ID}"
+            ).json()
+
+            print("Claim:", claim)
+
+            if claim.get("status") == "running":
+
+                path = clone_repo(
+                    job["repo"],
+                    job["id"]
+                )
+
+                if path:
+
+                    runtime = detect_runtime(path)
+
+                    print("Runtime:", runtime)
+
+                    process = run_project(
+                        path,
+                        runtime,
+                        job["id"]
+                    )
+
+                    if process:
+                        print("Started PID:", process.pid)
+
+            time.sleep(2)
+
+        time.sleep(5)
+
+    except Exception as e:
+        print("ERROR:", e)
+        time.sleep(5)
