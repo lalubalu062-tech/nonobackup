@@ -10,7 +10,7 @@ from migration import migration
 from resource_manager import monitor_resources
 
 
-print("NONO Worker v5 Started")
+print("NONO Worker v10 Started")
 
 
 threads = [

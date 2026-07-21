@@ -41,6 +41,7 @@ def build_project(job):
 
     app=f"{workspace}/app"
 
+    os.makedirs(f"{workspace}/logs", exist_ok=True)
     log=f"{workspace}/logs/build.log"
 
 

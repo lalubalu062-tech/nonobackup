@@ -1,104 +1,53 @@
 import subprocess
 import os
 import json
-import signal
-import psutil
-from container_manager import apply_limits
 from datetime import datetime
 
 BASE="/home/jeet/nono/projects"
 PROCESS_FILE="/home/jeet/nono/runner/processes.json"
 
-processes={}
-
-
-def save_process(project_id,pid,status="running"):
-
-    try:
-
-        os.makedirs(
-            os.path.dirname(PROCESS_FILE),
-            exist_ok=True
-        )
-
-        data={}
-
-        if os.path.exists(PROCESS_FILE):
-
-            with open(PROCESS_FILE) as f:
-                data=json.load(f)
-
-
-        data[str(project_id)] = {
-            "pid":pid,
-            "status":status,
-            "updated":str(datetime.utcnow())
-        }
-
-
-        with open(PROCESS_FILE,"w") as f:
-
-            json.dump(
-                data,
-                f,
-                indent=2
-            )
-
-
-    except Exception as e:
-
-        print(
-            "PROCESS SAVE ERROR",
-            e
-        )
-
-
 
 def save_pid_file(project_id,pid):
 
-    try:
+    path=f"{BASE}/{project_id}/pid.json"
 
-        path=f"{BASE}/{project_id}/pid.json"
-
-        data={
-            "pid":pid,
-            "status":"running",
-            "started":str(datetime.utcnow())
-        }
-
-
-        with open(path,"w") as f:
-
-            json.dump(
-                data,
-                f,
-                indent=2
-            )
-
-
-    except Exception as e:
-
-        print(
-            "PID FILE ERROR",
-            e
+    with open(path,"w") as f:
+        json.dump(
+            {
+                "pid":pid,
+                "status":"running",
+                "started":str(datetime.utcnow())
+            },
+            f,
+            indent=2
         )
-
 
 
 def start(project_id,cmd):
 
+    app_dir=f"{BASE}/{project_id}/app"
 
-    project_path=f"{BASE}/{project_id}"
-
-    log_dir=f"{project_path}/logs"
+    log_file=f"{BASE}/{project_id}/logs/app.log"
 
     os.makedirs(
-        log_dir,
+        os.path.dirname(log_file),
         exist_ok=True
     )
 
 
-    log_file=f"{log_dir}/app.log"
+    if isinstance(cmd,str):
+        cmd=cmd.split()
+
+
+    print(
+        "LAUNCHING APP:",
+        cmd
+    )
+
+    print(
+        "WORKDIR:",
+        app_dir
+    )
 
 
     log=open(
@@ -108,14 +57,11 @@ def start(project_id,cmd):
     )
 
 
-    if isinstance(cmd,str):
-
-        cmd=cmd.split()
-
-
     p=subprocess.Popen(
 
         cmd,
+
+        cwd=app_dir,
 
         stdout=log,
 
@@ -131,15 +77,6 @@ def start(project_id,cmd):
     )
 
 
-    processes[project_id]=p.pid
-
-
-    save_process(
-        project_id,
-        p.pid
-    )
-
-
     save_pid_file(
         project_id,
         p.pid
@@ -147,100 +84,32 @@ def start(project_id,cmd):
 
 
     print(
-        "PROCESS STARTED",
-        project_id,
+        "APP PID:",
         p.pid
     )
 
-
-    apply_limits(
-        project_id,
-        p.pid
-    )
 
     return p.pid
 
-
-
-def stop(project_id):
-
-
-    pid=processes.get(project_id)
-
-
-    if not pid:
-
-        try:
-
-            with open(
-                f"{BASE}/{project_id}/pid.json"
-            ) as f:
-
-                pid=json.load(f)["pid"]
-
-        except:
-
-            return False
-
-
-
+def save_port(project_id,port):
+    import sqlite3
     try:
-
-
-        if psutil.pid_exists(pid):
-
-            parent=psutil.Process(pid)
-
-
-            for child in parent.children(
-                recursive=True
-            ):
-
-                try:
-                    child.kill()
-
-                except:
-                    pass
-
-
-            try:
-
-                parent.kill()
-
-            except:
-                pass
-
-
-
-        try:
-
-            os.killpg(
-                os.getpgid(pid),
-                signal.SIGKILL
-            )
-
-        except:
-
-            pass
-
-
-
-        save_process(
-            project_id,
-            pid,
-            "stopped"
+        db="/home/jeet/nono/backend/nono.db"
+        conn=sqlite3.connect(db)
+        cur=conn.cursor()
+        cur.execute(
+            "UPDATE projects SET port=? WHERE id=?",
+            (port,project_id)
         )
-
-
-        return True
-
-
-
-    except Exception as e:
-
+        conn.commit()
+        conn.close()
         print(
-            "STOP ERROR",
+            "PORT SAVED",
+            project_id,
+            port
+        )
+    except Exception as e:
+        print(
+            "PORT SAVE ERROR",
             e
         )
-
-        return False
