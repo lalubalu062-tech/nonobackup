@@ -1,4 +1,16 @@
+from worker_guard import acquire_lock
 import threading
+from graceful import alive
+from cleanup_manager import clean
+from restart_queue import restart_loop
+from status_sync import status_sync
+acquire_lock()
+threading.Thread(target=clean,daemon=True).start()
+threading.Thread(target=restart_loop,daemon=True).start()
+threading.Thread(target=status_sync,daemon=True).start()
+
+import threading
+from graceful import alive
 import time
 
 from heartbeat import heartbeat
@@ -50,5 +62,5 @@ threading.Thread(
     daemon=True
 ).start()
 
-while True:
+while alive():
     time.sleep(60)

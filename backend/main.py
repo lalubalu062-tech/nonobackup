@@ -610,3 +610,35 @@ def project_logs(
         "logs":logs[-5000:]
     }
 
+
+
+class LoginRequest(BaseModel):
+    username:str
+    password:str
+
+
+@app.post("/login")
+def login(data: LoginRequest, db: Session = Depends(get_db)):
+
+    user=db.query(User).filter(
+        User.username == data.username
+    ).first()
+
+    if not user:
+        return {"error":"user not found"}
+
+    if not verify_password(
+        data.password,
+        user.password
+    ):
+        return {"error":"wrong password"}
+
+    token=create_token({
+        "user_id":user.id,
+        "username":user.username
+    })
+
+    return {
+        "access_token":token,
+        "token_type":"bearer"
+    }

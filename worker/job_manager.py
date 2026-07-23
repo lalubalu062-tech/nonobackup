@@ -6,6 +6,7 @@ from config import API_URL, WORKER_ID, CHECK_INTERVAL
 from process import start, save_port
 from deploy import deploy
 from tracer import trace
+from state_manager import set_state
 from build_engine import build_project
 from git_engine import clone_repo
 
@@ -37,6 +38,7 @@ def run_job(job):
 
     try:
 
+        set_state(job["id"],"cloning")
         print("STEP 1 CLONE")
         print("STEP CLONE START", job["id"])
         trace(job["id"],"CLONE_START")
@@ -49,6 +51,7 @@ def run_job(job):
             print("FAILED STEP TRACE:", job["id"])
             return
 
+        set_state(job["id"],"building")
         print("STEP 2 BUILD")
         print("STEP BUILD START", job["id"])
         trace(job["id"],"CLONE_DONE")
@@ -63,6 +66,7 @@ def run_job(job):
             return
 
         log_event(job["id"], "DEPLOY_START", job)
+        set_state(job["id"],"deploying")
         print("STEP 3 DEPLOY")
         print("STEP DEPLOY START", job["id"])
         trace(job["id"],"BUILD_DONE")
@@ -79,6 +83,7 @@ def run_job(job):
             return
 
 
+        set_state(job["id"],"starting")
         print("STEP 4 START PROCESS")
         print("STEP PROCESS START", deploy_result)
         trace(job["id"],"PROCESS_START")
