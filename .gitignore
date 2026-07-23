@@ -10,3 +10,10 @@ backups/
 *.tar.gz
 backups/
 *.tar.gz
+
+*.before_v11_fix
+*.before_lock_fix
+*.backup
+*.bak
+backend/nono.db
+runner/processes.json
